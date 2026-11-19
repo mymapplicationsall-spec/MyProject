@@ -1,0 +1,632 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Transaction Manager</title>
+
+  <style>
+    * { box-sizing: border-box; }
+
+    body {
+      font: 14px Arial, sans-serif;
+      margin: 20px;
+      color: #222;
+    }
+
+    h1 { font-size: 24px; }
+
+    .toolbar, .summary, .pagination {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin: 12px 0;
+    }
+
+    input, select, button {
+      padding: 8px;
+      font: inherit;
+    }
+
+    button { cursor: pointer; }
+    button:disabled { cursor: not-allowed; opacity: .5; }
+
+    .danger {
+      background: #b42318;
+      border: 1px solid #b42318;
+      color: white;
+    }
+
+    .table-wrap {
+      width: 100%;
+      overflow: auto;
+      max-height: 65vh;
+      border: 1px solid #ddd;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    table {
+      border-collapse: collapse;
+      min-width: 1800px;
+      width: 100%;
+    }
+
+    th, td {
+      border: 1px solid #ddd;
+      padding: 7px;
+      text-align: left;
+      white-space: nowrap;
+    }
+
+    thead th {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      background: #f3f5f7;
+    }
+
+    thead tr.filters th {
+      top: 35px;
+      z-index: 2;
+      background: #fff;
+    }
+
+    .filters input { width: 110px; }
+    .empty { text-align: center; padding: 24px; }
+    .active { font-weight: bold; background: #2457c5; color: white; }
+    #status { margin: 10px 0; color: #555; }
+
+    #modalBg {
+      display: none;
+      position: fixed;
+      inset: 0;
+      padding: 16px;
+      background: #0008;
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+    }
+
+    #modalBg.open { display: flex; }
+
+    .modal {
+      background: white;
+      padding: 20px;
+      width: min(420px, 100%);
+      border-radius: 8px;
+    }
+
+    #modalMessage { white-space: pre-line; }
+    .secondary { margin: 2px; }
+    #fileInput { display: none; }
+
+    .credential-field {
+      display: block;
+      width: 100%;
+      margin: 6px 0 12px;
+    }
+
+    @media (max-width: 600px) {
+      body { margin: 12px; }
+
+      h1 {
+        font-size: 21px;
+        margin: 12px 0;
+      }
+
+      .toolbar {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+
+      #search {
+        grid-column: 1 / -1;
+        width: 100%;
+      }
+
+      .toolbar button,
+      .toolbar select {
+        width: 100%;
+        min-height: 42px;
+      }
+
+      .summary {
+        display: block;
+        line-height: 1.8;
+      }
+
+      .pagination { gap: 6px; }
+      .pagination button { min-height: 40px; }
+
+      #pageInfo {
+        flex-basis: 100%;
+        font-size: 12px;
+      }
+
+      .table-wrap { max-height: 60vh; }
+    }
+  </style>
+</head>
+
+<body>
+  <h1>Transaction Manager</h1>
+
+  <div class="toolbar">
+    <input id="search" type="search" placeholder="Search all columns">
+
+    <select id="pageSize" aria-label="Rows per page">
+      <option>25</option>
+      <option selected>50</option>
+      <option>100</option>
+      <option>200</option>
+    </select>
+
+    <button id="clearBtn" type="button">Clear filters</button>
+    <button id="exportBtn" type="button">Export CSV</button>
+    <button id="importBtn" type="button">Import XLSX/CSV</button>
+    <button id="deleteBtn" class="danger" type="button">Delete all data</button>
+    <input id="fileInput" type="file" accept=".xlsx,.csv">
+  </div>
+
+  <div id="status">Connecting...</div>
+
+  <div class="summary">
+    <span>Total records: <strong id="totalRecords">0</strong></span>
+    <span id="recordInfo"></span>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead id="tableHead"></thead>
+      <tbody id="tableBody"></tbody>
+    </table>
+  </div>
+
+  <div class="pagination">
+    <button id="firstBtn" type="button">First</button>
+    <button id="prevBtn" type="button">Previous</button>
+    <span id="pageButtons"></span>
+    <span id="currentPage">1 / 1</span>
+    <button id="nextBtn" type="button">Next</button>
+    <button id="lastBtn" type="button">Last</button>
+    <span id="pageInfo"></span>
+  </div>
+
+  <div id="modalBg">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <h2 id="modalTitle"></h2>
+      <p id="modalMessage"></p>
+
+      <div id="deleteCredentials" hidden>
+        <label for="deleteUserId">User ID</label>
+        <input
+          id="deleteUserId"
+          class="credential-field"
+          type="text"
+          autocomplete="username"
+        >
+
+        <label for="deletePassword">Password</label>
+        <input
+          id="deletePassword"
+          class="credential-field"
+          type="password"
+          autocomplete="current-password"
+        >
+      </div>
+
+      <div class="toolbar">
+        <button id="modalOK" type="button">Continue</button>
+        <button id="modalCancel" type="button">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    "use strict";
+
+    const $ = id => document.getElementById(id);
+
+    const C = [
+      "Sl#", "Mode", "Check", "Sub id", "Plan Name", "Client Name",
+      "Tally ID", "Reporting Month", "Particulars", "Txn Date",
+      "Value Date", "Reference_1", "Reference_2", "Reference_3",
+      "Bank Dr", "Bank Cr", "Bank Bal", "Cash Dr", "Cash Cr",
+      "Cash Bal", "Adj Dr", "Adj Cr", "Adj Bal", "Total Debit",
+      "Total Credit", "Date_Val", "User"
+    ];
+
+    const filters = {};
+    let page = 1;
+    let pages = 1;
+    let total = 0;
+    let timer;
+    let activeController;
+    let requestId = 0;
+    let modalResolver;
+
+    function countFormat(value) {
+      return Number(value || 0).toLocaleString("en-IN");
+    }
+
+    function setStatus(message) {
+      $("status").textContent = message;
+    }
+
+    function queryParams() {
+      const params = new URLSearchParams({
+        page: String(page),
+        limit: $("pageSize").value,
+        search: $("search").value.trim()
+      });
+
+      Object.keys(filters).forEach(key => {
+        const value = String(filters[key] || "").trim();
+        if (value) params.set("f" + key, value);
+      });
+
+      return params;
+    }
+
+    function buildHeaders() {
+      const headerRow = document.createElement("tr");
+      const filterRow = document.createElement("tr");
+      filterRow.className = "filters";
+
+      C.forEach((column, index) => {
+        const heading = document.createElement("th");
+        heading.textContent = column;
+        headerRow.appendChild(heading);
+
+        const filterCell = document.createElement("th");
+        const input = document.createElement("input");
+        input.className = "filter-input";
+        input.placeholder = "Filter...";
+        input.setAttribute("aria-label", "Filter " + column);
+        input.value = filters[index] || "";
+
+        input.addEventListener("input", () => {
+          filters[index] = input.value;
+          page = 1;
+          delayedLoad();
+        });
+
+        filterCell.appendChild(input);
+        filterRow.appendChild(filterCell);
+      });
+
+      $("tableHead").replaceChildren(headerRow, filterRow);
+    }
+
+    function renderRows(rows) {
+      const tbody = $("tableBody");
+      const fragment = document.createDocumentFragment();
+
+      if (!rows.length) {
+        const tr = document.createElement("tr");
+        const td = document.createElement("td");
+        td.colSpan = C.length;
+        td.className = "empty";
+        td.textContent = "No records found.";
+        tr.appendChild(td);
+        tbody.replaceChildren(tr);
+        return;
+      }
+
+      rows.forEach(row => {
+        const tr = document.createElement("tr");
+
+        C.forEach(column => {
+          const td = document.createElement("td");
+          td.textContent = row[column] == null ? "" : String(row[column]);
+          td.title = td.textContent;
+          tr.appendChild(td);
+        });
+
+        fragment.appendChild(tr);
+      });
+
+      tbody.replaceChildren(fragment);
+    }
+
+    function renderPagination() {
+      $("currentPage").textContent = `${page} / ${pages}`;
+      $("firstBtn").disabled = page <= 1;
+      $("prevBtn").disabled = page <= 1;
+      $("nextBtn").disabled = page >= pages;
+      $("lastBtn").disabled = page >= pages;
+
+      const size = Number($("pageSize").value);
+      const start = total ? (page - 1) * size + 1 : 0;
+      const end = Math.min(page * size, total);
+
+      $("pageInfo").textContent =
+        `Showing ${countFormat(start)}–${countFormat(end)} of ${countFormat(total)} records`;
+
+      const container = $("pageButtons");
+      container.replaceChildren();
+
+      let from = Math.max(1, page - 2);
+      let to = Math.min(pages, page + 2);
+
+      if (page <= 3) to = Math.min(5, pages);
+      if (page >= pages - 2) from = Math.max(1, pages - 4);
+
+      for (let n = from; n <= to; n++) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.textContent = String(n);
+        btn.className = n === page ? "active" : "secondary";
+        btn.addEventListener("click", () => {
+          page = n;
+          loadData();
+        });
+        container.appendChild(btn);
+      }
+    }
+
+    async function responseJson(response) {
+      try {
+        return await response.json();
+      } catch {
+        return {};
+      }
+    }
+
+    async function loadData() {
+      if (activeController) activeController.abort();
+
+      const controller = new AbortController();
+      activeController = controller;
+      const id = ++requestId;
+
+      setStatus("Loading records...");
+
+      try {
+        const response = await fetch("/api/data?" + queryParams().toString(), {
+          signal: controller.signal,
+          headers: { Accept: "application/json" }
+        });
+
+        const data = await responseJson(response);
+
+        if (!response.ok) {
+          throw new Error(data.error || "Server error: " + response.status);
+        }
+
+        if (id !== requestId) return;
+
+        total = Number(data.total || 0);
+        pages = Math.max(1, Number(data.pages || 1));
+        page = Number(data.page || 1);
+
+        $("totalRecords").textContent = countFormat(total);
+        $("recordInfo").textContent =
+          `(${countFormat(total)} matching records)`;
+
+        renderRows(data.rows || []);
+        renderPagination();
+        setStatus("Connected · Data loaded successfully");
+      } catch (error) {
+        if (error.name === "AbortError") return;
+
+        console.error(error);
+        setStatus(error.message || "Unable to load data. Check server and MySQL.");
+
+        const tr = document.createElement("tr");
+        const td = document.createElement("td");
+        td.colSpan = C.length;
+        td.className = "empty";
+        td.textContent = "Connection error. Check that the server is running.";
+        tr.appendChild(td);
+        $("tableBody").replaceChildren(tr);
+      }
+    }
+
+    function delayedLoad() {
+      clearTimeout(timer);
+      timer = setTimeout(loadData, 300);
+    }
+
+    function closeModal(result) {
+      $("modalBg").classList.remove("open");
+
+      if (modalResolver) {
+        const resolve = modalResolver;
+        modalResolver = null;
+        resolve(result);
+      }
+    }
+
+    function confirmAction({ title, message, confirmText = "Continue" }) {
+      $("modalTitle").textContent = title;
+      $("modalMessage").textContent = message;
+      $("modalOK").textContent = confirmText;
+      $("modalBg").classList.add("open");
+
+      return new Promise(resolve => {
+        modalResolver = resolve;
+        $("modalOK").focus();
+      });
+    }
+
+    $("modalOK").addEventListener("click", () => closeModal(true));
+    $("modalCancel").addEventListener("click", () => closeModal(false));
+
+    $("modalBg").addEventListener("click", event => {
+      if (event.target === $("modalBg")) closeModal(false);
+    });
+
+    document.addEventListener("keydown", event => {
+      if (event.key === "Escape" && $("modalBg").classList.contains("open")) {
+        closeModal(false);
+      }
+    });
+
+    $("search").addEventListener("input", () => {
+      page = 1;
+      delayedLoad();
+    });
+
+    $("pageSize").addEventListener("change", () => {
+      page = 1;
+      loadData();
+    });
+
+    $("clearBtn").addEventListener("click", () => {
+      $("search").value = "";
+      Object.keys(filters).forEach(key => delete filters[key]);
+      page = 1;
+      buildHeaders();
+      loadData();
+    });
+
+    $("firstBtn").onclick = () => {
+      page = 1;
+      loadData();
+    };
+
+    $("prevBtn").onclick = () => {
+      if (page > 1) {
+        page--;
+        loadData();
+      }
+    };
+
+    $("nextBtn").onclick = () => {
+      if (page < pages) {
+        page++;
+        loadData();
+      }
+    };
+
+    $("lastBtn").onclick = () => {
+      page = pages;
+      loadData();
+    };
+
+    $("exportBtn").onclick = () => {
+      window.location.href = "/api/export?" + queryParams().toString();
+    };
+
+    $("importBtn").addEventListener("click", () => {
+      $("fileInput").click();
+    });
+
+    $("fileInput").addEventListener("change", async event => {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      if (!/\.(xlsx|csv)$/i.test(file.name)) {
+        setStatus("Choose an XLSX or CSV file.");
+        event.target.value = "";
+        return;
+      }
+
+      if (file.size > 50 * 1024 * 1024) {
+        setStatus("File exceeds the 50 MB limit.");
+        event.target.value = "";
+        return;
+      }
+
+      const confirmed = await confirmAction({
+        title: "Import transaction data",
+        message:
+          `File: ${file.name}\n\n` +
+          "The file must contain all 27 headers in the exact order.",
+        confirmText: "Import"
+      });
+
+      if (!confirmed) {
+        event.target.value = "";
+        return;
+      }
+
+      const form = new FormData();
+      form.append("file", file);
+
+      const importButton = $("importBtn");
+      importButton.disabled = true;
+      setStatus("Importing data...");
+
+      try {
+        const response = await fetch("/api/import", {
+          method: "POST",
+          body: form
+        });
+
+        const result = await responseJson(response);
+
+        if (!response.ok) {
+          throw new Error(result.error || "Import failed.");
+        }
+
+        setStatus(result.message || "Import successful.");
+        page = 1;
+        await loadData();
+      } catch (error) {
+        setStatus(error.message || "Import failed.");
+      } finally {
+        importButton.disabled = false;
+        event.target.value = "";
+      }
+    });
+
+    $("deleteBtn").addEventListener("click", async () => {
+      $("deleteCredentials").hidden = false;
+      $("deleteUserId").value = "";
+      $("deletePassword").value = "";
+
+      const confirmed = await confirmAction({
+        title: "Delete all transaction data",
+        message:
+          "This permanently deletes every transaction record.\n" +
+          "Enter the authorized user ID and password to continue.",
+        confirmText: "Delete all"
+      });
+
+      $("deleteCredentials").hidden = true;
+
+      if (!confirmed) return;
+
+      const userId = $("deleteUserId").value.trim();
+      const password = $("deletePassword").value;
+
+      const deleteButton = $("deleteBtn");
+      deleteButton.disabled = true;
+      setStatus("Checking credentials and deleting records...");
+
+      try {
+        const response = await fetch("/api/delete-all", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+          },
+          body: JSON.stringify({ userId, password })
+        });
+
+        const result = await responseJson(response);
+
+        if (!response.ok) {
+          throw new Error(result.error || "Delete failed.");
+        }
+
+        setStatus(result.message || "Records deleted.");
+        page = 1;
+        await loadData();
+      } catch (error) {
+        setStatus(error.message || "Delete failed.");
+      } finally {
+        $("deletePassword").value = "";
+        deleteButton.disabled = false;
+      }
+    });
+
+    buildHeaders();
+    loadData();
+  </script>
+</body>
+</html>
