@@ -300,13 +300,15 @@ app.get("/api/data", async (req, res) => {
       params
     );
 
-    const [rows] = await pool.execute(
-      `SELECT id, ${C.map(quoteId).join(", ")}
-       FROM transactions${sql}
-       ORDER BY id ASC
-       LIMIT ? OFFSET ?`,
-      [...params, limit, offset]
-    );
+    
+const [rows] = await pool.query(
+  `SELECT id, ${C.map(quoteId).join(", ")}
+   FROM transactions${sql}
+   ORDER BY id ASC
+   LIMIT ${limit} OFFSET ${offset}`,
+  params
+);
+
 
     const formattedRows = rows.map(row => {
       for (const column of MONEY_COLUMNS) {
@@ -571,13 +573,13 @@ app.get("/api/export", async (req, res) => {
     const batchSize = 1000;
 
     while (true) {
-      const [rows] = await connection.execute(
-        `SELECT ${C.map(quoteId).join(", ")}
-         FROM transactions${sql}
-         ORDER BY id ASC
-         LIMIT ? OFFSET ?`,
-        [...params, batchSize, offset]
-      );
+      const [rows] = await connection.query(
+  `SELECT ${C.map(quoteId).join(", ")}
+   FROM transactions${sql}
+   ORDER BY id ASC
+   LIMIT ${batchSize} OFFSET ${offset}`,
+  params
+);
 
       if (rows.length === 0) break;
 
