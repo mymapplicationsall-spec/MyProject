@@ -20,12 +20,16 @@ const PORT = Number(process.env.PORT) || 5000;
 const DELETE_USER_ID = "MYMadmin";
 const DELETE_PASSWORD = "MYMadmin2026";
 
+
+const useSSL = process.env.DB_SSL === "true";
+
 const pool = mysql.createPool({
   host: process.env.DB_HOST || "localhost",
   port: Number(process.env.DB_PORT) || 3306,
   user: process.env.DB_USER || "root",
   password: process.env.DB_PASSWORD || "",
   database: process.env.DB_NAME || "transaction_manager",
+  ssl: useSSL ? { minVersion: "TLSv1.2" } : undefined,
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
@@ -33,6 +37,7 @@ const pool = mysql.createPool({
   supportBigNumbers: true,
   bigNumberStrings: true
 });
+
 
 const upload = multer({
   dest: os.tmpdir(),
