@@ -24,6 +24,7 @@ const DELETE_PASSWORD = "MYMadmin2026";
 const useSSL = process.env.DB_SSL === "true";
 
 
+
 const pool = mysql.createPool({
   host: process.env.DB_HOST,
   port: Number(process.env.DB_PORT) || 4000,
@@ -35,6 +36,8 @@ const pool = mysql.createPool({
     minVersion: "TLSv1.2"
   },
 
+  enableCleartextPlugin: true,
+
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
@@ -42,6 +45,7 @@ const pool = mysql.createPool({
   supportBigNumbers: true,
   bigNumberStrings: true
 });
+
 
 
 
